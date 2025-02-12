@@ -1,32 +1,59 @@
 import sys
+import os
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QWidget, 
                              QPushButton, QLineEdit, QHBoxLayout, QMessageBox,
                              QProgressBar)
 from PyQt6.QtWebEngineWidgets import QWebEngineView
-from PyQt6.QtWebEngineCore import QWebEngineSettings, QWebEnginePage
+from PyQt6.QtWebEngineCore import QWebEngineSettings, QWebEnginePage, QWebEngineProfile
 from PyQt6.QtCore import QUrl, Qt, QSize
 from PyQt6.QtGui import QKeySequence, QAction, QIcon
+
+class CustomWebPage(QWebEnginePage):
+    def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
+        print(f"Console: {message} at line {lineNumber} from {sourceID}")
 
 class Browser(QMainWindow):
     def __init__(self):
         super().__init__()
 
+        # Enable debug logging
+        os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = '--enable-logging --log-level=0'
+        
         # Main window settings
         self.setWindowTitle("Modern Browser")
         self.setGeometry(100, 100, 1200, 800)
 
-        # Create browser view
+        # Create and configure web profile
+        self.profile = QWebEngineProfile.defaultProfile()
+        self.profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies)
+        
+        # Ensure the storage path exists
+        storage_path = "./browser_data"
+        os.makedirs(storage_path, exist_ok=True)
+        self.profile.setPersistentStoragePath(storage_path)
+        
+        # Create browser view with custom page
         self.browser = QWebEngineView()
-        self.browser.setUrl(QUrl("https://www.google.com"))
-        self.browser.urlChanged.connect(self.update_url)
-        self.browser.loadStarted.connect(self.load_started)
-        self.browser.loadProgress.connect(self.update_progress)
-        self.browser.loadFinished.connect(self.load_finished)
-
+        self.page = CustomWebPage(self.profile, self.browser)
+        self.browser.setPage(self.page)
+        
         # Enable JavaScript and other settings
         settings = self.browser.settings()
         settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
         settings.setAttribute(QWebEngineSettings.WebAttribute.PluginsEnabled, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.LocalStorageEnabled, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.WebGLEnabled, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.ScrollAnimatorEnabled, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.ErrorPageEnabled, True)
+
+        # Connect signals for better error handling
+        self.page.loadFinished.connect(self.handle_load_finished)
+        self.page.loadStarted.connect(self.load_started)
+        self.page.loadProgress.connect(self.update_progress)
+        
+        # Set initial URL
+        self.navigate_to_url("https://www.google.com")
 
         # Address bar
         self.url_bar = QLineEdit()
@@ -89,6 +116,13 @@ class Browser(QMainWindow):
         # Apply dark theme
         self.apply_dark_theme()
 
+    def navigate_to_url(self, url_string):
+        url = QUrl(url_string)
+        if url.scheme() == "":
+            url.setScheme("https")
+        self.browser.setUrl(url)
+        print(f"Navigating to: {url.toString()}")
+
     def create_nav_button(self, text, connection, tooltip):
         button = QPushButton(text)
         button.clicked.connect(connection)
@@ -111,29 +145,34 @@ class Browser(QMainWindow):
         url = self.url_bar.text().strip()
         if not url:
             return
-
-        if not url.startswith(("http://", "https://")):
-            url = "https://" + url
-        
-        self.browser.setUrl(QUrl(url))
+        self.navigate_to_url(url)
 
     def update_url(self, url):
         self.url_bar.setText(url.toString())
 
     def go_home(self):
-        self.browser.setUrl(QUrl("https://www.google.com"))
+        self.navigate_to_url("https://www.google.com")
 
     def load_started(self):
+        print("Page load started")
         self.progress_bar.setValue(0)
         self.progress_bar.show()
 
     def update_progress(self, progress):
         self.progress_bar.setValue(progress)
+        print(f"Loading progress: {progress}%")
 
-    def load_finished(self, ok):
+    def handle_load_finished(self, ok):
         self.progress_bar.hide()
         if not ok:
-            self.show_error_message("Failed to load the page")
+            error_info = "Unknown error"
+            if hasattr(self.page, 'error_info'):
+                error_info = self.page.error_info
+            self.show_error_message(f"Failed to load the page: {error_info}")
+            print(f"Page load failed: {error_info}")
+        else:
+            print("Page loaded successfully")
+            self.update_url(self.browser.url())
 
     def show_error_message(self, message):
         error_box = QMessageBox()
@@ -165,9 +204,12 @@ class Browser(QMainWindow):
         """)
 
 def main():
+    # Enable debug flags
+    os.environ['QTWEBENGINE_REMOTE_DEBUGGING'] = '9222'
+    
     app = QApplication(sys.argv)
     app.setApplicationName("Modern Browser")
-    app.setStyle("Fusion")  # Use Fusion style for a more modern look
+    app.setStyle("Fusion")
     
     window = Browser()
     window.show()
