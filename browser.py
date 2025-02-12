@@ -9,119 +9,129 @@ from PyQt6.QtCore import QUrl, Qt, QSize
 from PyQt6.QtGui import QKeySequence, QAction, QIcon
 
 class CustomWebPage(QWebEnginePage):
+    def __init__(self, profile, parent=None):
+        super().__init__(profile, parent)
+        self.error_info = "No error"
+
     def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
         print(f"Console: {message} at line {lineNumber} from {sourceID}")
+
+    def certificateError(self, error):
+        print(f"Certificate error: {error.errorDescription()}")
+        return False
 
 class Browser(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        # Enable debug logging
-        os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = '--enable-logging --log-level=0'
-        
+        # Set environment variables for Windows
+        os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = '--disable-gpu --disable-software-rasterizer --disable-dev-shm-usage'
+        os.environ['QTWEBENGINE_DISABLE_SANDBOX'] = '1'
+
         # Main window settings
         self.setWindowTitle("Modern Browser")
         self.setGeometry(100, 100, 1200, 800)
 
-        # Create and configure web profile
-        self.profile = QWebEngineProfile.defaultProfile()
-        self.profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies)
-        
-        # Ensure the storage path exists
-        storage_path = "./browser_data"
-        os.makedirs(storage_path, exist_ok=True)
-        self.profile.setPersistentStoragePath(storage_path)
-        
-        # Create browser view with custom page
-        self.browser = QWebEngineView()
-        self.page = CustomWebPage(self.profile, self.browser)
-        self.browser.setPage(self.page)
-        
-        # Enable JavaScript and other settings
-        settings = self.browser.settings()
-        settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
-        settings.setAttribute(QWebEngineSettings.WebAttribute.PluginsEnabled, True)
-        settings.setAttribute(QWebEngineSettings.WebAttribute.LocalStorageEnabled, True)
-        settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
-        settings.setAttribute(QWebEngineSettings.WebAttribute.WebGLEnabled, True)
-        settings.setAttribute(QWebEngineSettings.WebAttribute.ScrollAnimatorEnabled, True)
-        settings.setAttribute(QWebEngineSettings.WebAttribute.ErrorPageEnabled, True)
+        try:
+            # Create and configure web profile
+            self.profile = QWebEngineProfile.defaultProfile()
+            cache_path = os.path.join(os.path.expanduser("~"), "browser_cache")
+            os.makedirs(cache_path, exist_ok=True)
+            self.profile.setCachePath(cache_path)
+            self.profile.setPersistentStoragePath(os.path.join(cache_path, "storage"))
+            self.profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies)
 
-        # Connect signals for better error handling
-        self.page.loadFinished.connect(self.handle_load_finished)
-        self.page.loadStarted.connect(self.load_started)
-        self.page.loadProgress.connect(self.update_progress)
-        
-        # Set initial URL
-        self.navigate_to_url("https://www.google.com")
+            # Create browser view with custom page
+            self.browser = QWebEngineView()
+            self.page = CustomWebPage(self.profile, self.browser)
+            self.browser.setPage(self.page)
+            
+            # Enable JavaScript and other settings
+            settings = self.browser.settings()
+            settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.PluginsEnabled, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.LocalStorageEnabled, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.WebGLEnabled, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.ScrollAnimatorEnabled, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.ErrorPageEnabled, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.ScreenCaptureEnabled, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.WebRTCPublicInterfacesOnly, True)
 
-        # Address bar
-        self.url_bar = QLineEdit()
-        self.url_bar.returnPressed.connect(self.navigate)
-        self.url_bar.setPlaceholderText("Enter URL")
-        self.url_bar.setStyleSheet("""
-            QLineEdit {
-                border: 1px solid #555;
-                border-radius: 10px;
-                padding: 5px 15px;
-                background: #2a2a2a;
-                color: #fff;
-            }
-        """)
+            # Connect signals for better error handling
+            self.browser.urlChanged.connect(self.update_url)
+            self.page.loadStarted.connect(self.load_started)
+            self.page.loadProgress.connect(self.update_progress)
+            self.page.loadFinished.connect(self.handle_load_finished)
 
-        # Navigation buttons
-        self.back_button = self.create_nav_button("◀", self.browser.back, "Go back")
-        self.forward_button = self.create_nav_button("▶", self.browser.forward, "Go forward")
-        self.reload_button = self.create_nav_button("↻", self.browser.reload, "Reload page")
-        self.home_button = self.create_nav_button("🏠", self.go_home, "Go home")
+            # Address bar
+            self.url_bar = QLineEdit()
+            self.url_bar.returnPressed.connect(self.navigate)
+            self.url_bar.setPlaceholderText("Enter URL")
+            self.url_bar.setStyleSheet("""
+                QLineEdit {
+                    border: 1px solid #555;
+                    border-radius: 10px;
+                    padding: 5px 15px;
+                    background: #2a2a2a;
+                    color: #fff;
+                }
+            """)
 
-        # Progress bar
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setTextVisible(False)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                border: none;
-                background: #2a2a2a;
-            }
-            QProgressBar::chunk {
-                background-color: #3498db;
-            }
-        """)
+            # Navigation buttons
+            self.back_button = self.create_nav_button("◀", self.browser.back, "Go back")
+            self.forward_button = self.create_nav_button("▶", self.browser.forward, "Go forward")
+            self.reload_button = self.create_nav_button("↻", self.browser.reload, "Reload page")
+            self.home_button = self.create_nav_button("🏠", self.go_home, "Go home")
 
-        # Layout
-        nav_layout = QHBoxLayout()
-        nav_layout.addWidget(self.back_button)
-        nav_layout.addWidget(self.forward_button)
-        nav_layout.addWidget(self.reload_button)
-        nav_layout.addWidget(self.home_button)
-        nav_layout.addWidget(self.url_bar)
-        nav_layout.setSpacing(10)
-        nav_layout.setContentsMargins(10, 10, 10, 0)
+            # Progress bar
+            self.progress_bar = QProgressBar()
+            self.progress_bar.setTextVisible(False)
+            self.progress_bar.setStyleSheet("""
+                QProgressBar {
+                    border: none;
+                    background: #2a2a2a;
+                }
+                QProgressBar::chunk {
+                    background-color: #3498db;
+                }
+            """)
 
-        main_layout = QVBoxLayout()
-        main_layout.addLayout(nav_layout)
-        main_layout.addWidget(self.progress_bar)
-        main_layout.addWidget(self.browser)
-        main_layout.setSpacing(0)
-        main_layout.setContentsMargins(0, 0, 0, 0)
+            # Layout
+            nav_layout = QHBoxLayout()
+            nav_layout.addWidget(self.back_button)
+            nav_layout.addWidget(self.forward_button)
+            nav_layout.addWidget(self.reload_button)
+            nav_layout.addWidget(self.home_button)
+            nav_layout.addWidget(self.url_bar)
+            nav_layout.setSpacing(10)
+            nav_layout.setContentsMargins(10, 10, 10, 0)
 
-        # Main container
-        container = QWidget()
-        container.setLayout(main_layout)
-        self.setCentralWidget(container)
+            main_layout = QVBoxLayout()
+            main_layout.addLayout(nav_layout)
+            main_layout.addWidget(self.progress_bar)
+            main_layout.addWidget(self.browser)
+            main_layout.setSpacing(0)
+            main_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Shortcuts
-        self.setup_shortcuts()
+            # Main container
+            container = QWidget()
+            container.setLayout(main_layout)
+            self.setCentralWidget(container)
 
-        # Apply dark theme
-        self.apply_dark_theme()
+            # Shortcuts
+            self.setup_shortcuts()
 
-    def navigate_to_url(self, url_string):
-        url = QUrl(url_string)
-        if url.scheme() == "":
-            url.setScheme("https")
-        self.browser.setUrl(url)
-        print(f"Navigating to: {url.toString()}")
+            # Apply dark theme
+            self.apply_dark_theme()
+
+            # Initial navigation
+            self.navigate_to_url("https://www.google.com")
+
+        except Exception as e:
+            QMessageBox.critical(None, "Initialization Error", 
+                               f"Failed to initialize browser components: {str(e)}")
+            raise
 
     def create_nav_button(self, text, connection, tooltip):
         button = QPushButton(text)
@@ -140,6 +150,13 @@ class Browser(QMainWindow):
             }
         """)
         return button
+
+    def navigate_to_url(self, url_string):
+        url = QUrl(url_string)
+        if url.scheme() == "":
+            url.setScheme("https")
+        self.browser.setUrl(url)
+        print(f"Navigating to: {url.toString()}")
 
     def navigate(self):
         url = self.url_bar.text().strip()
@@ -164,15 +181,12 @@ class Browser(QMainWindow):
 
     def handle_load_finished(self, ok):
         self.progress_bar.hide()
-        if not ok:
-            error_info = "Unknown error"
-            if hasattr(self.page, 'error_info'):
-                error_info = self.page.error_info
-            self.show_error_message(f"Failed to load the page: {error_info}")
-            print(f"Page load failed: {error_info}")
-        else:
+        if ok:
             print("Page loaded successfully")
-            self.update_url(self.browser.url())
+            print(f"Current URL: {self.browser.url().toString()}")
+        else:
+            print("Failed to load page")
+            self.show_error_message("Failed to load the page")
 
     def show_error_message(self, message):
         error_box = QMessageBox()
@@ -204,16 +218,26 @@ class Browser(QMainWindow):
         """)
 
 def main():
-    # Enable debug flags
-    os.environ['QTWEBENGINE_REMOTE_DEBUGGING'] = '9222'
-    
-    app = QApplication(sys.argv)
-    app.setApplicationName("Modern Browser")
-    app.setStyle("Fusion")
-    
-    window = Browser()
-    window.show()
-    sys.exit(app.exec())
+    try:
+        # Enable debug logging
+        os.environ['QTWEBENGINE_REMOTE_DEBUGGING'] = '9222'
+        
+        app = QApplication(sys.argv)
+        app.setApplicationName("Modern Browser")
+        app.setStyle("Fusion")
+        
+        # Print versions
+        print(f"Python version: {sys.version}")
+        from PyQt6.QtCore import QT_VERSION_STR
+        print(f"Qt version: {QT_VERSION_STR}")
+        
+        window = Browser()
+        window.show()
+        
+        return app.exec()
+    except Exception as e:
+        print(f"Fatal error: {str(e)}")
+        return 1
 
 if __name__ == "__main__":
     main()
